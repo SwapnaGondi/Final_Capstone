@@ -4,10 +4,10 @@ kind: ClusterConfig
 
 metadata:
   name: capstoneudacity-eksctl
-  region: ec-central-1
+  region: eu-central-1
   version: "1.21"
 
-availabilityZones: ["ec-central-1a", "ec-central-1b", "ec-central-1c"]
+availabilityZones: ["eu-central-1a", "eu-central-1b", "eu-central-1c"]
 
 managedNodeGroups:
 - name: nodegroup
