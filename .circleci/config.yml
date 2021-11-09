@@ -1,0 +1,192 @@
+version: 2.1
+
+orbs:
+  slack: circleci/slack@4.4.2
+  aws-eks: circleci/aws-eks@0.2.3
+  kubernetes: circleci/kubernetes@0.4.0
+
+defaults: &default
+  docker:
+    - image: circleci/node:13.8.0
+
+jobs:
+  update-files:
+    <<: *default
+    steps:
+      - checkout
+      - run:
+          name: Update About.html
+          working_directory: ./app
+          command: |
+            sed -i -e "s/@WorkflowId@/${CIRCLE_WORKFLOW_ID:0:7}/;" templates/about.html
+            sed -i -e "s/@GIT_COMMIT@/${CIRCLE_SHA1:0:7}/;" templates/about.html
+            pwd
+            ls -ltr
+            cat templates/about.html
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project/app
+
+
+  lint-dockerfile:
+    docker:
+      - image: python:3.7.3-stretch
+    steps:
+      - checkout
+      - run:
+          name: Lint Dockerfile
+          working_directory: ./app
+          command: |
+            python3 -m venv ~/.devops
+            . ~/.devops/bin/activate
+            make install
+            # Install hadolint
+            wget -O /bin/hadolint https://github.com/hadolint/hadolint/releases/download/v1.16.3/hadolint-Linux-x86_64 &&\
+            chmod +x /bin/hadolint
+            make lint
+
+  create-and-upload-dockerimage:
+    machine: true
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Create and Upload Image to DockerHub
+          working_directory: ./app
+          command: |
+            docker build --tag=swapnagondi/udacity .
+            docker image ls
+
+            docker run -d --rm --name capstone -p 80:80 swapnagondi/udacity:latest
+            sleep 10
+            docker container ls
+            sleep 20
+            export URL="http://localhost:80/about"
+            export output=$(curl -s $URL)
+            echo "Output of curl : $output"
+            if [[ $output == *"${CIRCLE_WORKFLOW_ID:0:7}"* ]]; then
+              echo "Success"
+              docker stop capstone
+            else
+              echo "Failure"
+              echo $output
+              docker stop capstone
+              exit 1
+            fi
+
+            docker login --username $DOCKER_USER --password $DOCKER_PASSWORD
+            sh upload_docker.sh
+
+  create-cluster:
+    docker:
+      - image: circleci/node
+    steps:
+      - checkout
+      - run:
+          name: Install AWS CLI dependencies
+          working_directory: /tmp
+          command: |
+            sudo apt-get update && sudo apt-get install -yy less
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+      - run:
+          name: Create Cluster
+          working_directory: ./eksCluster
+          command: |
+            mystackcount=`aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE | grep "capstoneudacity-eksctl" | wc -l`
+            if [[ $mystackcount -gt 0 ]]
+            then
+              echo "Cluster Found"
+            else
+              echo "Cluster Not Found"
+              curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+              sudo mv /tmp/eksctl /usr/local/bin
+              eksctl version
+              aws ec2 describe-key-pairs --key-name capstone
+              docker login --username $DOCKER_USER --password $DOCKER_PASSWORD
+              sh create-cluster.sh
+            fi
+
+
+  test-eks:
+    executor: aws-eks/python3
+    parameters:
+      cluster-name:
+        description: |
+          Name of the EKS cluster
+        type: string
+    steps:
+      - kubernetes/install
+      - aws-eks/update-kubeconfig-with-authenticator:
+          cluster-name: << parameters.cluster-name >>
+      - run:
+          name: Kube cluster
+          command: |
+            kubectl get svc
+            kubectl get nodes
+            kubectl get deployment
+            kubectl get pods
+
+  create-deployment:
+    executor: aws-eks/python3
+    parameters:
+      cluster-name:
+        description: |
+          Name of the EKS cluster
+        type: string
+    steps:
+      - checkout
+      - aws-eks/update-kubeconfig-with-authenticator:
+          cluster-name: << parameters.cluster-name >>
+          install-kubectl: true
+      - kubernetes/create-or-update-resource:
+          get-rollout-status: true
+          resource-file-path: eksCluster/deployment.yaml
+          resource-name: deployment/capstoneudacity
+      - kubernetes/create-or-update-resource:
+          get-rollout-status: true
+          resource-file-path: eksCluster/service.yaml
+          resource-name: deployment/capstoneudacity
+      - run:
+          name: Rolling Deployment
+          command: |
+            kubectl rollout restart deployment/capstoneudacity
+
+
+  test-cluster:
+    executor: aws-eks/python3
+    parameters:
+      cluster-name:
+        description: |
+          Name of the EKS cluster
+        type: string
+    steps:
+      - kubernetes/install
+      - aws-eks/update-kubeconfig-with-authenticator:
+          cluster-name: << parameters.cluster-name >>
+      - run:
+          name: Kube cluster
+          command: |
+            kubectl get services
+
+workflows:
+  default:
+    jobs:
+      - update-files
+      - lint-dockerfile
+      - create-and-upload-dockerimage:
+          requires: [update-files,lint-dockerfile]
+      - create-cluster:
+          requires: [update-files, lint-dockerfile]
+      - test-eks:
+          cluster-name: capstoneudacity-eksctl
+          requires: [create-cluster]
+      - create-deployment:
+          cluster-name: capstoneudacity-eksctl
+          requires: [test-eks, create-and-upload-dockerimage]
+      - test-cluster:
+          cluster-name: capstoneudacity-eksctl
+          requires: [create-deployment]
