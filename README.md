@@ -8,8 +8,13 @@ In this project, I applied my skills and knowledge which was developed throughou
 
 Project Tasks:
 Working in AWS
+
 Using CircleCI to implement Continuous Integration and Continuous Deployment (Rolling)
+
 Building pipelines
+
 Working with CloudFormation to deploy clusters
+
 Building Kubernetes clusters
+
 Building Docker containers in pipelines
