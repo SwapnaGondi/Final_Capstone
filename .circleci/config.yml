@@ -96,13 +96,14 @@ jobs:
           name: Create Cluster
           working_directory: ./eksCluster
           command: |
+            echo "list"
             mystackcount=`aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE | grep "capstoneudacity-eksctl" | wc -l`
             if [[ $mystackcount -gt 0 ]]
             then
               echo "Cluster Found"
             else
               echo "Cluster Not Found"
-              curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+              curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
               sudo mv /tmp/eksctl /usr/local/bin
               eksctl version
               aws ec2 describe-key-pairs --key-name capstone
