@@ -97,7 +97,7 @@ jobs:
           working_directory: ./eksCluster
           command: |
             echo "list"
-            mystackcount=`aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE | grep "capstoneudacity-eksctl" | wc -l`
+            mystackcount='aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE | grep "capstoneudacity-eksctl" | wc -l'
             if [[ $mystackcount -gt 0 ]]
             then
               echo "Cluster Found"
